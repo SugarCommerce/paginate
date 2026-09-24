@@ -51,6 +51,43 @@ final readonly class Page {
 	) {}
 
 	/**
+	 * One page of rows that are already in memory.
+	 *
+	 * For lists filtered or ordered by something SQL cannot express — a
+	 * forgiving search, say — so the caller loads the rows, narrows them
+	 * itself, and still gets the same controls the Paginator gives. Reads
+	 * `page` and `per` from the query as the Paginator does, with the same
+	 * allow-list for sizes and the same clamping of the page number.
+	 *
+	 * @since 1.1.0
+	 *
+	 * @param array           $rows   Every matching row, in order.
+	 * @param array           $query  The request query string.
+	 * @param array<int, int> $sizes  Page sizes on offer; the first is the default.
+	 * @param string          $search The search term in effect, for display.
+	 *
+	 * @return self
+	 */
+	public static function slice( array $rows, array $query, array $sizes = Paginator::SIZES, string $search = '' ): self {
+		$requested = is_numeric( $query['per'] ?? null ) ? (int) $query['per'] : 0;
+		$per_page  = in_array( $requested, $sizes, true ) ? $requested : $sizes[0];
+		$total     = count( $rows );
+		$pages     = max( 1, (int) ceil( $total / $per_page ) );
+		$number    = min( max( 1, is_numeric( $query['page'] ?? null ) ? (int) $query['page'] : 1 ), $pages );
+
+		return new self(
+			rows: array_slice( array_values( $rows ), ( $number - 1 ) * $per_page, $per_page ),
+			total: $total,
+			number: $number,
+			pages: $pages,
+			per_page: $per_page,
+			search: $search,
+			sizes: $sizes,
+			query: $query,
+		);
+	}
+
+	/**
 	 * Is there anything to show?
 	 *
 	 * @since 1.0.0

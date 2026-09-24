@@ -61,6 +61,48 @@ final class PaginatorTest extends TestCase {
 		);
 	}
 
+	/* ─── conditions (1.1.0) ─────────────────────────────────────────── */
+
+	/**
+	 * One value against either of two columns — what a filter, which is
+	 * always `column = value`, cannot say.
+	 */
+	public function test_a_condition_narrows_with_its_own_bound_values(): void {
+		$page = $this->paginator->run(
+			table: 'things',
+			columns: '*',
+			sortable: array( 'created_at' ),
+			searchable: array(),
+			filters: array( 'status' => 'active' ),
+			query: array(),
+			default_sort: 'created_at',
+			conditions: array( '( name = :wanted OR created_at = :at )' => array( 'wanted' => 'Thing 005', 'at' => 1_000_007 ) ),
+		);
+
+		$this->assertSame( array( 'Thing 007', 'Thing 005' ), array_column( $page->rows, 'name' ) );
+		$this->assertSame( 2, $page->total, 'Counted with the same conditions.' );
+	}
+
+	public function test_a_value_is_bound_not_written_into_the_query(): void {
+		$page = $this->paginator->run(
+			table: 'things', columns: '*', sortable: array( 'created_at' ), searchable: array(), filters: array(),
+			query: array(), default_sort: 'created_at',
+			conditions: array( 'name = :name' => array( 'name' => "x' OR '1'='1" ) ),
+		);
+
+		$this->assertTrue( $page->is_empty() );
+	}
+
+	public function test_a_condition_cannot_take_a_name_the_filters_use(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		$this->paginator->run(
+			table: 'things', columns: '*', sortable: array( 'created_at' ), searchable: array(), filters: array( 'status' => 'active' ),
+			query: array(), default_sort: 'created_at',
+			conditions: array( 'name = :filter_0' => array( 'filter_0' => 'Thing 001' ) ),
+		);
+	}
+
 	public function test_the_first_page_holds_the_default_size(): void {
 		$page = $this->paged();
 

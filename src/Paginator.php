@@ -80,8 +80,19 @@ final readonly class Paginator {
 	 *                                           `per` and `page`.
 	 * @param string               $default_sort Column to sort by when none
 	 *                                           is given.
+	 * @param array<string, array> $conditions   Further clauses, each with
+	 *                                           the values it binds: for what
+	 *                                           `column = value` cannot say,
+	 *                                           such as one value against
+	 *                                           either of two columns. The
+	 *                                           clause is written in code;
+	 *                                           only the values may come from
+	 *                                           a request. Since 1.1.0.
 	 *
 	 * @return Page
+	 *
+	 * @throws \InvalidArgumentException When a condition's parameter name is
+	 *                                   one the filters or the search use.
 	 */
 	public function run(
 		string $table,
@@ -91,6 +102,7 @@ final readonly class Paginator {
 		array $filters,
 		array $query,
 		string $default_sort,
+		array $conditions = array(),
 	): Page {
 		$search    = Input::clean_text( (string) ( $query['q'] ?? '' ), 120 );
 		$sort      = Input::one_of( (string) ( $query['sort'] ?? '' ), $sortable, $default_sort );
@@ -98,7 +110,7 @@ final readonly class Paginator {
 		$per_page  = $this->size( $query['per'] ?? 0 );
 		$number    = Input::int( $query['page'] ?? 1, 1, 100_000, 1 );
 
-		[ $where, $args ] = $this->where( $search, $searchable, $filters );
+		[ $where, $args ] = $this->where( $search, $searchable, $filters, $conditions );
 
 		$total  = (int) $this->db->value( "SELECT COUNT(*) FROM {$table} {$where}", $args );
 		$pages  = max( 1, (int) ceil( $total / $per_page ) );
@@ -150,10 +162,11 @@ final readonly class Paginator {
 	 * @param string               $search     The search term.
 	 * @param array<int, string>   $searchable Columns to match it against.
 	 * @param array<string, mixed> $filters    Literal predicates.
+	 * @param array<string, array> $conditions Clauses with their own values.
 	 *
 	 * @return array{0: string, 1: array} The clause, and the arguments to bind.
 	 */
-	private function where( string $search, array $searchable, array $filters ): array {
+	private function where( string $search, array $searchable, array $filters, array $conditions = array() ): array {
 		$clauses = array();
 		$args    = array();
 
@@ -176,6 +189,20 @@ final readonly class Paginator {
 			}
 
 			$clauses[] = '(' . implode( ' OR ', $ors ) . ')';
+		}
+
+		foreach ( $conditions as $clause => $values ) {
+			foreach ( $values as $name => $value ) {
+				// Two values under one name would bind whichever came last,
+				// and the query would quietly ask something else.
+				if ( array_key_exists( $name, $args ) || str_starts_with( (string) $name, 'filter_' ) || str_starts_with( (string) $name, 'search' ) ) {
+					throw new \InvalidArgumentException( 'Condition parameter :' . $name . ' is already in use.' );
+				}
+
+				$args[ $name ] = $value;
+			}
+
+			$clauses[] = '(' . $clause . ')';
 		}
 
 		return array( $clauses ? 'WHERE ' . implode( ' AND ', $clauses ) : '', $args );

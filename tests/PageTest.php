@@ -34,6 +34,45 @@ final class PageTest extends TestCase {
 		) ) );
 	}
 
+	/* ─── slice (1.1.0) ──────────────────────────────────────────────── */
+
+	public function test_a_slice_is_the_asked_for_page_of_the_rows(): void {
+		$page = Page::slice( range( 1, 120 ), array( 'page' => '2', 'per' => '50' ), array( 25, 50 ) );
+
+		$this->assertSame( range( 51, 100 ), $page->rows );
+		$this->assertSame( 120, $page->total );
+		$this->assertSame( 3, $page->pages );
+		$this->assertSame( 51, $page->from() );
+		$this->assertSame( '?page=3&per=50', $page->page_link( 3 ) );
+	}
+
+	/**
+	 * The same allow-list the Paginator has: a size off the list is the
+	 * default, not whatever was asked for.
+	 */
+	public function test_a_slice_keeps_to_the_sizes_on_offer(): void {
+		$this->assertSame( 25, Page::slice( range( 1, 500 ), array( 'per' => '100000' ), array( 25, 50 ) )->per_page );
+	}
+
+	public function test_a_page_past_the_end_is_the_last_and_before_the_start_the_first(): void {
+		$this->assertSame( 3, Page::slice( range( 1, 60 ), array( 'page' => '99' ), array( 25 ) )->number );
+		$this->assertSame( array( 51, 52, 53, 54, 55, 56, 57, 58, 59, 60 ), Page::slice( range( 1, 60 ), array( 'page' => '99' ), array( 25 ) )->rows );
+		$this->assertSame( 1, Page::slice( range( 1, 60 ), array( 'page' => '-4' ), array( 25 ) )->number );
+		$this->assertSame( 1, Page::slice( range( 1, 60 ), array( 'page' => 'x' ), array( 25 ) )->number );
+	}
+
+	public function test_nothing_is_one_empty_page(): void {
+		$page = Page::slice( array(), array(), array( 25 ) );
+
+		$this->assertTrue( $page->is_empty() );
+		$this->assertFalse( $page->is_paged() );
+		$this->assertSame( 1, $page->number );
+	}
+
+	public function test_keys_do_not_survive_a_slice(): void {
+		$this->assertSame( array( 'b' ), Page::slice( array( 5 => 'a', 9 => 'b' ), array( 'page' => 2 ), array( 1 ) )->rows );
+	}
+
 	public function test_a_single_page_is_not_worth_controls(): void {
 		$this->assertFalse( $this->page( array( 'pages' => 1 ) )->is_paged() );
 		$this->assertTrue( $this->page()->is_paged() );
