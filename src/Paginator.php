@@ -46,7 +46,7 @@ final readonly class Paginator {
 	/**
 	 * Page sizes on offer by default.
 	 */
-	public const SIZES = array( 25, 50, 100, 200 );
+	public const array SIZES = array( 25, 50, 100, 200 );
 
 	/**
 	 * @param Database        $db    Connection.
