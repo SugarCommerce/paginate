@@ -187,4 +187,13 @@ final class PageTest extends TestCase {
 		$this->assertStringContainsString( 'per=50', $link );
 		$this->assertStringContainsString( 'page=1', $link );
 	}
+
+	/* ─── meta (1.2.0) ───────────────────────────────────────────────── */
+
+	public function test_meta_is_the_four_numbers_an_api_returns(): void {
+		$this->assertSame(
+			array( 'total' => 500, 'page' => 10, 'pages' => 20, 'per_page' => 25 ),
+			$this->page()->meta()
+		);
+	}
 }

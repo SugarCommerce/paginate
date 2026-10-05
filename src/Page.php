@@ -156,6 +156,26 @@ final readonly class Page {
 	}
 
 	/**
+	 * Where this page sits, for a JSON client that wants the next one.
+	 *
+	 * The four numbers an API puts beside its rows. Built here so every
+	 * endpoint answers with the same keys — the alternative is each one
+	 * writing the array out again, and the third spelling `perPage`.
+	 *
+	 * @since 1.2.0
+	 *
+	 * @return array{total: int, page: int, pages: int, per_page: int}
+	 */
+	public function meta(): array {
+		return array(
+			'total'    => $this->total,
+			'page'     => $this->number,
+			'pages'    => $this->pages,
+			'per_page' => $this->per_page,
+		);
+	}
+
+	/**
 	 * Page numbers to render, with null standing in for a gap.
 	 *
 	 * A sliding window around the current page, always including the first

@@ -84,6 +84,7 @@ to recompute any of it:
 | `$page->window()` | `[1, 2, null, 8, 9, 10, 11, 12, null, 19, 20]` |
 | `$page->page_link()` / `sort_link()` / `size_link()` | query strings |
 | `$page->sorted_by( $column )` | for the arrow on a header |
+| `$page->meta()` | `['total' => 500, 'page' => 10, 'pages' => 20, 'per_page' => 25]`, for a JSON API |
 
 `window()` returns `null` for a gap rather than `'…'`, so the template picks its
 own ellipsis and there is nothing to compare strings against. It never starts or
@@ -98,11 +99,22 @@ page is what changed. Page 7 of a new search is almost never what was meant.
 Empty values are dropped too, so an unfiltered list has a clean URL rather than
 a row of `&q=&state=&dir=`.
 
+`meta()` is the same counts under the keys a JSON client expects, so every
+endpoint answering with a page answers with the same four numbers:
+
+```php
+return Response::json( array( 'orders' => $page->rows ) + $page->meta() );
+```
+
 ## Testing
 
 ```bash
 composer test
 ```
+
+43 tests: the SQL the Paginator builds and binds, the allow-lists for sort
+columns and sizes, page clamping, in-memory slices, the sliding window, and
+every link keeping or dropping the right parts of the query string.
 
 ## License
 
