@@ -40,6 +40,8 @@ final readonly class Page {
 	 * @param string            $direction 'asc' or 'desc'.
 	 * @param array<int, int>   $sizes     Page sizes on offer.
 	 * @param array<mixed>      $query     The request query string, for links.
+	 * @param string            $param     The query parameter holding the page
+	 *                                     number. Since 1.4.0.
 	 */
 	public function __construct(
 		public array $rows,
@@ -52,7 +54,62 @@ final readonly class Page {
 		public string $direction = 'desc',
 		public array $sizes = array(),
 		public array $query = array(),
+		public string $param = 'page',
 	) {}
+
+	/**
+	 * The numbers and links for a list that runs its own query.
+	 *
+	 * For a page that already counts its rows and applies its own LIMIT and
+	 * OFFSET — offset() is the OFFSET — and wants nothing from here but the
+	 * arithmetic and the links. There are no rows on the page it returns.
+	 *
+	 * The page number is read as `(int)` reads it, so `?page=3x` is page 3
+	 * and anything that is not a number is page 1, then clamped to the pages
+	 * there are: past the end is the last page rather than an empty one.
+	 * The page size is used as given — choosing it is the caller's job, and
+	 * nothing from the request reaches it.
+	 *
+	 * ```php
+	 * $page = Page::of( $total, $request->query, 50 );
+	 * $rows = $db->all( 'SELECT … LIMIT 50 OFFSET :offset', array( 'offset' => $page->offset() ) );
+	 * ```
+	 *
+	 * @since 1.4.0
+	 *
+	 * @param int          $total    Matching rows across every page.
+	 * @param array<mixed> $query    The request query string.
+	 * @param int          $per_page Rows per page.
+	 * @param string       $param    The parameter holding the page number.
+	 *
+	 * @return self
+	 *
+	 * @throws \InvalidArgumentException When the page size is less than 1, or
+	 *                                   the parameter name is empty.
+	 */
+	public static function of( int $total, array $query, int $per_page, string $param = 'page' ): self {
+		if ( $per_page < 1 ) {
+			throw new \InvalidArgumentException( 'A page size is a positive integer.' );
+		}
+
+		if ( '' === $param ) {
+			throw new \InvalidArgumentException( 'Name the parameter that holds the page number.' );
+		}
+
+		$requested = $query[ $param ] ?? 1;
+		$pages     = max( 1, (int) ceil( $total / $per_page ) );
+		$number    = min( max( 1, is_int( $requested ) || is_string( $requested ) ? (int) $requested : 1 ), $pages );
+
+		return new self(
+			rows: array(),
+			total: $total,
+			number: $number,
+			pages: $pages,
+			per_page: $per_page,
+			query: $query,
+			param: $param,
+		);
+	}
 
 	/**
 	 * One page of rows that are already in memory.
@@ -165,6 +222,66 @@ final readonly class Page {
 	}
 
 	/**
+	 * How many rows come before this page: the query's OFFSET.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @return int
+	 */
+	public function offset(): int {
+		return ( $this->number - 1 ) * $this->per_page;
+	}
+
+	/**
+	 * A link to the first page, or null when this is it.
+	 *
+	 * Like every *_link() of 1.4.0, a query string alone — `?page=1&q=x` —
+	 * that a browser resolves against the page it is on. The page number
+	 * comes first and every other parameter follows exactly as it arrived,
+	 * empty ones included; only the page changes.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @return string|null
+	 */
+	public function first_link(): ?string {
+		return $this->number > 1 ? $this->swap( 1 ) : null;
+	}
+
+	/**
+	 * A link to the previous page, or null on the first.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @return string|null
+	 */
+	public function previous_link(): ?string {
+		return $this->number > 1 ? $this->swap( $this->number - 1 ) : null;
+	}
+
+	/**
+	 * A link to the next page, or null on the last.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @return string|null
+	 */
+	public function next_link(): ?string {
+		return $this->number < $this->pages ? $this->swap( $this->number + 1 ) : null;
+	}
+
+	/**
+	 * A link to the last page, or null when this is it.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @return string|null
+	 */
+	public function last_link(): ?string {
+		return $this->number < $this->pages ? $this->swap( $this->pages ) : null;
+	}
+
+	/**
 	 * Where this page sits, for a JSON client that wants the next one.
 	 *
 	 * The four numbers an API puts beside its rows. Built here so every
@@ -250,7 +367,7 @@ final readonly class Page {
 	 * @return string
 	 */
 	public function page_link( int $number ): string {
-		return $this->link( array( 'page' => $number ) );
+		return $this->link( array( $this->param => $number ) );
 	}
 
 	/**
@@ -263,7 +380,7 @@ final readonly class Page {
 	 * @return string
 	 */
 	public function size_link( int $size ): string {
-		return $this->link( array( 'per' => $size, 'page' => 1 ) );
+		return $this->link( array( 'per' => $size, $this->param => 1 ) );
 	}
 
 	/**
@@ -286,10 +403,27 @@ final readonly class Page {
 
 		// Changing anything other than the page returns to the first one —
 		// page 7 of a new search is almost never what was meant.
-		if ( ! isset( $changes['page'] ) ) {
-			unset( $params['page'] );
+		if ( ! isset( $changes[ $this->param ] ) ) {
+			unset( $params[ $this->param ] );
 		}
 
 		return $params ? '?' . http_build_query( $params ) : '';
+	}
+
+	/**
+	 * The query string with another page number, and nothing else changed.
+	 *
+	 * @since 1.4.0
+	 *
+	 * @param int $number Page number.
+	 *
+	 * @return string Including '?'.
+	 */
+	private function swap( int $number ): string {
+		$rest = $this->query;
+
+		unset( $rest[ $this->param ] );
+
+		return '?' . http_build_query( array( $this->param => $number ) + $rest, '', '&' );
 	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "sugarcommerce/paginate",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Paging, sorting and search for list screens, with the column names allow-listed because they cannot be bound as parameters. Returns a page object that knows how to render its own controls.",
   "type": "library",
   "license": "GPL-2.0-or-later",

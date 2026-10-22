@@ -91,6 +91,8 @@ to recompute any of it:
 | `$page->window()` | `[1, 2, null, 8, 9, 10, 11, 12, null, 19, 20]` |
 | `$page->page_link()` / `sort_link()` / `size_link()` | query strings |
 | `$page->sorted_by( $column )` | for the arrow on a header |
+| `$page->offset()` | the OFFSET for this page |
+| `$page->first_link()` / `previous_link()` / `next_link()` / `last_link()` | query strings, or null at the ends |
 | `$page->meta()` | `['total' => 500, 'page' => 10, 'pages' => 20, 'per_page' => 25]`, for a JSON API |
 
 `window()` returns `null` for a gap rather than `'…'`, so the template picks its
@@ -113,15 +115,41 @@ endpoint answering with a page answers with the same four numbers:
 return Response::json( array( 'orders' => $page->rows ) + $page->meta() );
 ```
 
+### A list that runs its own query
+
+`Page::of()` is the arithmetic and the links without the query, for a page that
+already counts its rows and applies its own LIMIT:
+
+```php
+$page = Page::of( $total, $request->query, 50 );         // reads ?page=
+$rows = $db->all( 'SELECT … LIMIT 50 OFFSET :offset', array( 'offset' => $page->offset() ) );
+
+$page->first_link();    // '?page=1&q=alf', or null on the first page
+$page->previous_link(); // likewise
+$page->next_link();     // '?page=3&q=alf', or null on the last page
+$page->last_link();     // likewise
+
+Page::of( $total, $request->query, 50, 'p' );            // a different parameter
+```
+
+The page number is read as `(int)` reads it — `?page=3x` is page 3, anything
+that is not a number is page 1 — and clamped to the pages there are, so past the
+end is the last page rather than an empty one. The size is used as given; it is
+the caller's, not the request's. These four links are query strings alone, which
+the browser resolves against the page it is on: the page number first, then
+every other parameter exactly as it arrived, empty ones included. Only the page
+changes.
+
 ## Testing
 
 ```bash
 composer test
 ```
 
-51 tests: the SQL the Paginator builds and binds, the allow-lists for sort
-columns and sizes, page clamping, in-memory slices, the sliding window, and
-every link keeping or dropping the right parts of the query string.
+55 tests: the SQL the Paginator builds and binds, the allow-lists for sort
+columns and sizes, page clamping, in-memory slices, pages counted elsewhere
+against the same numbers written out by hand, the sliding window, and every
+link keeping or dropping the right parts of the query string.
 
 ## License
 

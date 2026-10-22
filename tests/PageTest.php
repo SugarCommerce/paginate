@@ -9,6 +9,7 @@ declare( strict_types=1 );
 
 namespace SugarCommerce\Paginate\Tests;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SugarCommerce\Paginate\Page;
 
@@ -195,5 +196,135 @@ final class PageTest extends TestCase {
 			array( 'total' => 500, 'page' => 10, 'pages' => 20, 'per_page' => 25 ),
 			$this->page()->meta()
 		);
+	}
+
+	/* ─── of (1.4.0) ─────────────────────────────────────────────────── */
+
+	/**
+	 * The same arithmetic and links written out by hand, as a list page
+	 * that runs its own COUNT and LIMIT would have it, with query-only links.
+	 *
+	 * @param array<mixed> $query    The query string.
+	 * @param int          $total    Matching rows.
+	 * @param int          $per_page Rows per page.
+	 *
+	 * @return array<string, int|string|null>
+	 */
+	private static function by_hand( array $query, int $total, int $per_page ): array {
+		$page  = max( 1, (int) ( $query['page'] ?? 1 ) );
+		$pages = max( 1, (int) ceil( $total / max( 1, $per_page ) ) );
+		$page  = min( $page, $pages );
+
+		$params = $query;
+		unset( $params['page'] );
+		$qs = array() === $params ? '' : '&' . http_build_query( $params );
+
+		return array(
+			'total'    => $total,
+			'page'     => $page,
+			'pages'    => $pages,
+			'per_page' => $per_page,
+			'offset'   => ( $page - 1 ) * $per_page,
+			'first'    => $page > 1 ? '?page=1' . $qs : null,
+			'prev'     => $page > 1 ? '?page=' . ( $page - 1 ) . $qs : null,
+			'next'     => $page < $pages ? '?page=' . ( $page + 1 ) . $qs : null,
+			'last'     => $page < $pages ? '?page=' . $pages . $qs : null,
+		);
+	}
+
+	/**
+	 * @return array<string, array{0: array<mixed>, 1: int, 2: int}>
+	 */
+	public static function hand_written_cases(): array {
+		return array(
+			'no rows'               => array( array(), 0, 50 ),
+			'one page'              => array( array(), 50, 50 ),
+			'first of several'      => array( array( 'q' => 'alf' ), 120, 50 ),
+			'middle, page last'     => array( array( 'q' => 'alf', 'page' => '2', 'status' => '' ), 120, 50 ),
+			'middle, page first'    => array( array( 'page' => '2', 'q' => 'alf' ), 500, 100 ),
+			'last'                  => array( array( 'page' => '3' ), 120, 50 ),
+			'past the end'          => array( array( 'page' => '99', 'sort' => 'name' ), 120, 50 ),
+			'below the start'       => array( array( 'page' => '-4' ), 120, 50 ),
+			'zero'                  => array( array( 'page' => '0' ), 120, 50 ),
+			'not a number'          => array( array( 'page' => 'abc' ), 120, 50 ),
+			'leading digits'        => array( array( 'page' => '2abc' ), 120, 50 ),
+			'decimal'               => array( array( 'page' => '2.9' ), 500, 50 ),
+			'an array'              => array( array( 'page' => array( '3' ) ), 500, 50 ),
+			'empty and nested'      => array( array( 'q' => '', 'tags' => array( 'a', 'b' ), 'page' => '2' ), 500, 50 ),
+			'encoded values'        => array( array( 'q' => 'a b&c=d', 'page' => '2' ), 500, 50 ),
+			'an int already'        => array( array( 'page' => 4 ), 500, 50 ),
+			'more than an int'      => array( array( 'page' => '99999999999999999999999' ), 500, 50 ),
+			'exponent'              => array( array( 'page' => '1e999' ), 500, 50 ),
+		);
+	}
+
+	#[DataProvider( 'hand_written_cases' )]
+	public function test_of_matches_the_hand_written_numbers_and_links( array $query, int $total, int $per_page ): void {
+		$page = Page::of( $total, $query, $per_page );
+
+		$this->assertSame(
+			self::by_hand( $query, $total, $per_page ),
+			array(
+				'total'    => $page->total,
+				'page'     => $page->number,
+				'pages'    => $page->pages,
+				'per_page' => $page->per_page,
+				'offset'   => $page->offset(),
+				'first'    => $page->first_link(),
+				'prev'     => $page->previous_link(),
+				'next'     => $page->next_link(),
+				'last'     => $page->last_link(),
+			)
+		);
+	}
+
+	public function test_of_clamps_and_links_a_middle_page(): void {
+		$page = Page::of( 120, array( 'q' => 'x', 'page' => '2' ), 50 );
+
+		$this->assertSame( 2, $page->number );
+		$this->assertSame( 3, $page->pages );
+		$this->assertSame( 50, $page->offset() );
+		$this->assertSame( '?page=1&q=x', $page->first_link() );
+		$this->assertSame( '?page=1&q=x', $page->previous_link() );
+		$this->assertSame( '?page=3&q=x', $page->next_link() );
+		$this->assertSame( '?page=3&q=x', $page->last_link() );
+		$this->assertSame( array(), $page->rows );
+	}
+
+	public function test_of_has_no_links_on_a_single_page(): void {
+		$page = Page::of( 0, array( 'page' => '5' ), 50 );
+
+		$this->assertSame( 1, $page->number );
+		$this->assertSame( 1, $page->pages );
+		$this->assertSame( 0, $page->offset() );
+		$this->assertNull( $page->first_link() );
+		$this->assertNull( $page->previous_link() );
+		$this->assertNull( $page->next_link() );
+		$this->assertNull( $page->last_link() );
+	}
+
+	public function test_of_reads_another_parameter_when_told(): void {
+		$page = Page::of( 300, array( 'p' => '2', 'page' => '9' ), 100, 'p' );
+
+		$this->assertSame( 2, $page->number );
+		$this->assertSame( '?p=3&page=9', $page->next_link() );
+		$this->assertSame( '?p=4&page=9', $page->page_link( 4 ) );
+		$this->assertSame( '?p=1&page=9&per=50', $page->size_link( 50 ) );
+	}
+
+	public function test_of_refuses_a_page_size_below_one(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		Page::of( 10, array(), 0 );
+	}
+
+	public function test_of_refuses_an_empty_parameter_name(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		Page::of( 10, array(), 10, '' );
+	}
+
+	public function test_offset_counts_the_rows_before_the_page(): void {
+		$this->assertSame( 225, $this->page()->offset() );
 	}
 }
