@@ -26,16 +26,20 @@ namespace SugarCommerce\Paginate;
 final readonly class Page {
 
 	/**
-	 * @param array              $rows      The rows for this page.
-	 * @param int                $total     Matching rows across every page.
-	 * @param int                $number    Current page, from 1.
-	 * @param int                $pages     Total pages, at least 1.
-	 * @param int                $per_page  Rows per page.
-	 * @param string             $search    The search term in effect.
-	 * @param string             $sort      The sort column in effect.
-	 * @param string             $direction 'asc' or 'desc'.
-	 * @param array<int, int>    $sizes     Page sizes on offer.
-	 * @param array              $query     The request query string, for links.
+	 * Hold one page and the state its controls are drawn from.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param array<int, mixed> $rows      The rows for this page.
+	 * @param int               $total     Matching rows across every page.
+	 * @param int               $number    Current page, from 1.
+	 * @param int               $pages     Total pages, at least 1.
+	 * @param int               $per_page  Rows per page.
+	 * @param string            $search    The search term in effect.
+	 * @param string            $sort      The sort column in effect.
+	 * @param string            $direction 'asc' or 'desc'.
+	 * @param array<int, int>   $sizes     Page sizes on offer.
+	 * @param array<mixed>      $query     The request query string, for links.
 	 */
 	public function __construct(
 		public array $rows,
@@ -61,14 +65,19 @@ final readonly class Page {
 	 *
 	 * @since 1.1.0
 	 *
-	 * @param array           $rows   Every matching row, in order.
-	 * @param array           $query  The request query string.
-	 * @param array<int, int> $sizes  Page sizes on offer; the first is the default.
-	 * @param string          $search The search term in effect, for display.
+	 * @param array<int, mixed> $rows   Every matching row, in order.
+	 * @param array<mixed>      $query  The request query string.
+	 * @param array<int, int>   $sizes  Page sizes on offer; the first is the default.
+	 * @param string            $search The search term in effect, for display.
 	 *
 	 * @return self
+	 *
+	 * @throws \InvalidArgumentException When the sizes are not a non-empty
+	 *                                   list of positive integers.
 	 */
 	public static function slice( array $rows, array $query, array $sizes = Paginator::SIZES, string $search = '' ): self {
+		Paginator::check_sizes( $sizes );
+
 		$requested = is_numeric( $query['per'] ?? null ) ? (int) $query['per'] : 0;
 		$per_page  = in_array( $requested, $sizes, true ) ? $requested : $sizes[0];
 		$total     = count( $rows );

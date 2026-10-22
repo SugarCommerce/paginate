@@ -45,6 +45,13 @@ $page = $paginator->run( ..., sortable: array( 'created_at', 'name' ), ... );
 Page sizes are allow-listed too, for a different reason: an arbitrary `?per=`
 is a way to make the server build a hundred thousand rows into memory, and no
 legitimate caller needs one.
+The sizes themselves must be positive integers: a zero divides by zero, and a
+negative `LIMIT` is no limit at all to SQLite.
+
+A condition may not bind `:limit` or `:offset`, or a name the filters or the
+search use, with or without its leading colon — the second value would
+silently replace the first. Anything in the query string that is not a string,
+`?sort[]=x`, counts as absent.
 
 `$table`, `$columns` and the **keys** of `$filters` are interpolated without
 ceremony, because they are written in code. Filter *values* are bound. Do not
@@ -112,7 +119,7 @@ return Response::json( array( 'orders' => $page->rows ) + $page->meta() );
 composer test
 ```
 
-43 tests: the SQL the Paginator builds and binds, the allow-lists for sort
+51 tests: the SQL the Paginator builds and binds, the allow-lists for sort
 columns and sizes, page clamping, in-memory slices, the sliding window, and
 every link keeping or dropping the right parts of the query string.
 

@@ -103,6 +103,80 @@ final class PaginatorTest extends TestCase {
 		);
 	}
 
+	/**
+	 * The binder strips a leading colon, so `:filter_0` is `filter_0` — and
+	 * would quietly replace the filter's value.
+	 */
+	public function test_a_colon_does_not_smuggle_a_name_the_filters_use(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		$this->paginator->run(
+			table: 'things', columns: '*', sortable: array( 'created_at' ), searchable: array(), filters: array( 'status' => 'archived' ),
+			query: array(), default_sort: 'created_at',
+			conditions: array( 'id > 0' => array( ':filter_0' => 'active' ) ),
+		);
+	}
+
+	/**
+	 * A condition value called `limit` would become the LIMIT: as many rows
+	 * as the request liked, past the allow-list of sizes.
+	 */
+	public function test_a_condition_cannot_take_the_limit_or_offset(): void {
+		foreach ( array( 'limit', 'offset', ':LIMIT' ) as $name ) {
+			try {
+				$this->paginator->run(
+					table: 'things', columns: '*', sortable: array( 'created_at' ), searchable: array(), filters: array(),
+					query: array(), default_sort: 'created_at',
+					conditions: array( 'id > :' . ltrim( strtolower( $name ), ':' ) => array( $name => 0 ) ),
+				);
+				$this->fail( 'A condition took the name ' . $name . '.' );
+			} catch ( \InvalidArgumentException ) {
+				$this->addToAssertionCount( 1 );
+			}
+		}
+	}
+
+	/**
+	 * `?sort[]=x` is an array; cast to a string it is "Array" and a warning.
+	 */
+	public function test_array_query_values_count_as_absent(): void {
+		$page = $this->paged( array( 'q' => array( 'x' ), 'sort' => array( 'name' ), 'dir' => array( 'asc' ) ) );
+
+		$this->assertSame( 120, $page->total );
+		$this->assertSame( 'created_at', $page->sort );
+		$this->assertSame( 'desc', $page->direction );
+	}
+
+	/**
+	 * A zero divides by zero; a negative LIMIT is no limit to SQLite.
+	 *
+	 * @return array<string, array{0: array<mixed>}>
+	 */
+	public static function unusable_sizes(): array {
+		return array(
+			'none'     => array( array() ),
+			'zero'     => array( array( 0, 25 ) ),
+			'negative' => array( array( -1 ) ),
+			'string'   => array( array( '25' ) ),
+		);
+	}
+
+	/**
+	 * @param array<mixed> $sizes Page sizes.
+	 */
+	#[\PHPUnit\Framework\Attributes\DataProvider( 'unusable_sizes' )]
+	public function test_unusable_page_sizes_are_refused( array $sizes ): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		new Paginator( $this->db, $sizes );
+	}
+
+	public function test_a_slice_refuses_a_negative_size(): void {
+		$this->expectException( \InvalidArgumentException::class );
+
+		Page::slice( array( 1, 2, 3 ), array( 'per' => '-1' ), array( -1, 25 ) );
+	}
+
 	public function test_the_first_page_holds_the_default_size(): void {
 		$page = $this->paged();
 

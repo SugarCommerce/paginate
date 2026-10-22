@@ -45,54 +45,91 @@ final readonly class Paginator {
 
 	/**
 	 * Page sizes on offer by default.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @var list<int>
 	 */
 	public const array SIZES = array( 25, 50, 100, 200 );
 
 	/**
+	 * Parameter names the query binds itself, which a condition may not use.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @var list<string>
+	 */
+	private const array RESERVED = array( 'limit', 'offset' );
+
+	/**
+	 * Page through a connection.
+	 *
+	 * @since 1.0.0
+	 *
 	 * @param Database        $db    Connection.
 	 * @param array<int, int> $sizes Page sizes a caller may choose. Anything
 	 *                               else falls back to the first.
+	 *
+	 * @throws \InvalidArgumentException When the sizes are not a non-empty
+	 *                                   list of positive integers.
 	 */
 	public function __construct(
 		private Database $db,
 		private array $sizes = self::SIZES,
-	) {}
+	) {
+		self::check_sizes( $sizes );
+	}
 
 	/**
 	 * Run a paged query.
 	 *
 	 * @since 1.0.0
 	 *
-	 * @param string               $table        Table name or JOIN expression.
-	 *                                           Written in code, never from a
-	 *                                           request.
-	 * @param string               $columns      SELECT list. Same.
-	 * @param array<int, string>   $sortable     Columns that may be sorted on.
-	 * @param array<int, string>   $searchable   Columns the search term is
-	 *                                           matched against.
-	 * @param array<string, mixed> $filters      Literal `column => value`
-	 *                                           predicates. Keys are written
-	 *                                           in code; values are bound.
-	 *                                           Null and '' are skipped, so an
-	 *                                           unset filter costs nothing.
-	 * @param array                $query        The request query string.
-	 *                                           Reads `q`, `sort`, `dir`,
-	 *                                           `per` and `page`.
-	 * @param string               $default_sort Column to sort by when none
-	 *                                           is given.
-	 * @param array<string, array> $conditions   Further clauses, each with
-	 *                                           the values it binds: for what
-	 *                                           `column = value` cannot say,
-	 *                                           such as one value against
-	 *                                           either of two columns. The
-	 *                                           clause is written in code;
-	 *                                           only the values may come from
-	 *                                           a request. Since 1.1.0.
+	 * @param string                              $table        Table name or JOIN
+	 *                                                          expression. Written
+	 *                                                          in code, never from
+	 *                                                          a request.
+	 * @param string                              $columns      SELECT list. Same.
+	 * @param array<int, string>                  $sortable     Columns that may be
+	 *                                                          sorted on.
+	 * @param array<int, string>                  $searchable   Columns the search
+	 *                                                          term is matched
+	 *                                                          against.
+	 * @param array<string, mixed>                $filters      Literal `column =>
+	 *                                                          value` predicates.
+	 *                                                          Keys are written in
+	 *                                                          code; values are
+	 *                                                          bound. Null and ''
+	 *                                                          are skipped, so an
+	 *                                                          unset filter costs
+	 *                                                          nothing.
+	 * @param array<mixed>                        $query        The request query
+	 *                                                          string. Reads `q`,
+	 *                                                          `sort`, `dir`, `per`
+	 *                                                          and `page`; anything
+	 *                                                          there that is not a
+	 *                                                          string — `?sort[]=x`
+	 *                                                          — counts as absent.
+	 * @param string                              $default_sort Column to sort by
+	 *                                                          when none is given.
+	 * @param array<string, array<string, mixed>> $conditions   Further clauses,
+	 *                                                          each with the values
+	 *                                                          it binds: for what
+	 *                                                          `column = value`
+	 *                                                          cannot say, such as
+	 *                                                          one value against
+	 *                                                          either of two
+	 *                                                          columns. The clause
+	 *                                                          is written in code;
+	 *                                                          only the values may
+	 *                                                          come from a request.
+	 *                                                          Since 1.1.0.
 	 *
 	 * @return Page
 	 *
 	 * @throws \InvalidArgumentException When a condition's parameter name is
-	 *                                   one the filters or the search use.
+	 *                                   one the filters, the search or the
+	 *                                   LIMIT and OFFSET use.
 	 */
 	public function run(
 		string $table,
@@ -104,15 +141,15 @@ final readonly class Paginator {
 		string $default_sort,
 		array $conditions = array(),
 	): Page {
-		$search    = Input::clean_text( (string) ( $query['q'] ?? '' ), 120 );
-		$sort      = Input::one_of( (string) ( $query['sort'] ?? '' ), $sortable, $default_sort );
-		$direction = 'asc' === strtolower( (string) ( $query['dir'] ?? '' ) ) ? 'ASC' : 'DESC';
+		$search    = Input::clean_text( self::text( $query['q'] ?? '' ), 120 );
+		$sort      = Input::one_of( self::text( $query['sort'] ?? '' ), $sortable, $default_sort );
+		$direction = 'asc' === strtolower( self::text( $query['dir'] ?? '' ) ) ? 'ASC' : 'DESC';
 		$per_page  = $this->size( $query['per'] ?? 0 );
 		$number    = Input::int( $query['page'] ?? 1, 1, 100_000, 1 );
 
 		[ $where, $args ] = $this->where( $search, $searchable, $filters, $conditions );
 
-		$total  = (int) $this->db->value( "SELECT COUNT(*) FROM {$table} {$where}", $args );
+		$total  = self::whole( $this->db->value( "SELECT COUNT(*) FROM {$table} {$where}", $args ) );
 		$pages  = max( 1, (int) ceil( $total / $per_page ) );
 		$number = min( $number, $pages );
 
@@ -159,12 +196,16 @@ final readonly class Paginator {
 	 *
 	 * @since 1.0.0
 	 *
-	 * @param string               $search     The search term.
-	 * @param array<int, string>   $searchable Columns to match it against.
-	 * @param array<string, mixed> $filters    Literal predicates.
-	 * @param array<string, array> $conditions Clauses with their own values.
+	 * @param string                              $search     The search term.
+	 * @param array<int, string>                  $searchable Columns to match it against.
+	 * @param array<string, mixed>                $filters    Literal predicates.
+	 * @param array<string, array<string, mixed>> $conditions Clauses with their own values.
 	 *
-	 * @return array{0: string, 1: array} The clause, and the arguments to bind.
+	 * @return array{0: string, 1: array<string, mixed>} The clause, and the
+	 *                                                  arguments to bind.
+	 *
+	 * @throws \InvalidArgumentException When a condition's parameter name is
+	 *                                   already taken.
 	 */
 	private function where( string $search, array $searchable, array $filters, array $conditions = array() ): array {
 		$clauses = array();
@@ -193,9 +234,19 @@ final readonly class Paginator {
 
 		foreach ( $conditions as $clause => $values ) {
 			foreach ( $values as $name => $value ) {
+				// The binder strips a leading colon, so `:filter_0` is
+				// `filter_0` and must be checked as such.
+				$name = ltrim( (string) $name, ':' );
+
 				// Two values under one name would bind whichever came last,
-				// and the query would quietly ask something else.
-				if ( array_key_exists( $name, $args ) || str_starts_with( (string) $name, 'filter_' ) || str_starts_with( (string) $name, 'search' ) ) {
+				// and the query would quietly ask something else — or, for
+				// LIMIT, return as many rows as a request liked.
+				if (
+					array_key_exists( $name, $args )
+					|| in_array( strtolower( $name ), self::RESERVED, true )
+					|| str_starts_with( $name, 'filter_' )
+					|| str_starts_with( $name, 'search' )
+				) {
 					throw new \InvalidArgumentException( 'Condition parameter :' . $name . ' is already in use.' );
 				}
 
@@ -226,5 +277,65 @@ final readonly class Paginator {
 	 */
 	private static function escape_like( string $term ): string {
 		return str_replace( array( '\\', '%', '_' ), array( '\\\\', '\\%', '\\_' ), $term );
+	}
+
+	/**
+	 * A query-string value as a string, or '' when it is not one.
+	 *
+	 * `?sort[]=x` arrives as an array; cast, it is "Array" and a warning.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @param mixed $value From the query string.
+	 *
+	 * @return string
+	 */
+	private static function text( mixed $value ): string {
+		return is_string( $value ) || is_int( $value ) ? (string) $value : '';
+	}
+
+	/**
+	 * A count read back from SQLite, as an int.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @param mixed $value What the query returned.
+	 *
+	 * @return int Zero for anything that is not a number.
+	 */
+	private static function whole( mixed $value ): int {
+		return match ( true ) {
+			is_int( $value )     => $value,
+			is_numeric( $value ) => (int) $value,
+			default              => 0,
+		};
+	}
+
+	/**
+	 * Refuse page sizes that cannot page.
+	 *
+	 * An empty list leaves nothing to fall back on; a zero divides by zero
+	 * when the pages are counted; and a negative LIMIT is no limit at all to
+	 * SQLite, so `?per=-1` would return the whole table.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @param array<mixed> $sizes Page sizes on offer.
+	 *
+	 * @return void
+	 *
+	 * @throws \InvalidArgumentException When one is not a positive integer,
+	 *                                   or there are none.
+	 */
+	public static function check_sizes( array $sizes ): void {
+		if ( array() === $sizes || ! array_is_list( $sizes ) ) {
+			throw new \InvalidArgumentException( 'Offer at least one page size, as a list.' );
+		}
+
+		foreach ( $sizes as $size ) {
+			if ( ! is_int( $size ) || $size < 1 ) {
+				throw new \InvalidArgumentException( 'A page size is a positive integer.' );
+			}
+		}
 	}
 }
